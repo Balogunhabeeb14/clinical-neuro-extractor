@@ -91,6 +91,36 @@ best-effort extraction (the model's read of messy free text), not a
 guaranteed-accurate structured parse - spot-check results before relying on
 them clinically.
 
+### Report clinical/demographic details
+
+Beyond the section split above, `clinical_neuro_extractor.report_llm_extractor`
+pulls clinically useful facts out of a report's prose using the same
+Claude + Pydantic approach: diagnosis, laterality, treatment type, whether
+the assessment was pre- or post-treatment, referral reason, and
+demographic context (occupation, handedness, education, marital status,
+living situation) mentioned in the text - plus each cognitive domain's
+overall rating (e.g. Memory: high average) pulled from ASSESSMENT
+FINDINGS/CONCLUSIONS. Many reports don't mention treatment at all (e.g. a
+pre-surgical baseline) - a null `treatment_type`/`treatment_timing` is a
+normal, correct result, not a failure. Also requires the `llm` extra.
+
+```python
+from clinical_neuro_extractor.report_llm_extractor import extract_report_details_batch
+
+details, domain_summaries = extract_report_details_batch(documents)
+# details columns: document_guid, client_guid, diagnosis, diagnosis_laterality,
+#   treatment_type, treatment_timing, treatment_details,
+#   reason_for_referral_summary, occupation, handedness, education,
+#   marital_status, living_situation, other_demographic_notes, error
+# domain_summaries columns: document_guid, client_guid, domain, overall_level, notes
+```
+
+Note: structured demographics you already have as columns in the source
+dataframe (name, DOB, gender, race, address, language, religion) don't need
+extraction - this module is for demographic/clinical detail only mentioned
+in the report's free text (occupation, handedness, etc.), not a replacement
+for those fields.
+
 ### Development
 
 ```bash
