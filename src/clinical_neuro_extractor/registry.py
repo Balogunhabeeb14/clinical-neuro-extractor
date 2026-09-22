@@ -131,6 +131,11 @@ def build_patient_registry(
     else:
         registry["n_documents"] = grouped.size()
 
+    if "document_description" in df.columns:
+        doc_type = df["document_description"].astype("string").str.strip().str.lower()
+        registry["n_reports"] = doc_type.eq("report").groupby(df["client_guid"]).sum()
+        registry["n_assessments"] = doc_type.eq("assessment").groupby(df["client_guid"]).sum()
+
     if "clientvisit_visitidcode" in df.columns:
         registry["n_visits"] = grouped["clientvisit_visitidcode"].nunique()
 

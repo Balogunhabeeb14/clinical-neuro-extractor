@@ -10,6 +10,7 @@ def documents() -> pd.DataFrame:
         [
             {
                 "document_guid": "doc-1",
+                "document_description": "report",
                 "client_guid": "pt-1",
                 "client_idcode": "MRN001",
                 "client_touchedwhen": "2024-01-05",
@@ -23,7 +24,6 @@ def documents() -> pd.DataFrame:
                 "client_racecode": "W",
                 "client_title": "Ms",
                 "client_applicsource": "intake",
-                "document_description": "Neuropsych intake note",
                 "body_analysed": "...",
                 "updatetime": "2024-01-05",
                 "clientvisit_visitidcode": "v1",
@@ -43,6 +43,7 @@ def documents() -> pd.DataFrame:
             },
             {
                 "document_guid": "doc-2",
+                "document_description": "assessment",
                 "client_guid": "pt-1",
                 "client_idcode": "MRN001",
                 "client_touchedwhen": "2024-03-10",
@@ -56,7 +57,6 @@ def documents() -> pd.DataFrame:
                 "client_racecode": "W",
                 "client_title": "Ms",
                 "client_applicsource": "intake",
-                "document_description": "Follow-up note",
                 "body_analysed": "...",
                 "updatetime": "2024-03-10",
                 "clientvisit_visitidcode": "v2",
@@ -76,6 +76,7 @@ def documents() -> pd.DataFrame:
             },
             {
                 "document_guid": "doc-3",
+                "document_description": "report",
                 "client_guid": "pt-2",
                 "client_idcode": "MRN002",
                 "client_touchedwhen": "2024-02-01",
@@ -89,7 +90,6 @@ def documents() -> pd.DataFrame:
                 "client_racecode": "B",
                 "client_title": "Mr",
                 "client_applicsource": "referral",
-                "document_description": "Neuropsych eval",
                 "body_analysed": "...",
                 "updatetime": "2024-02-01",
                 "clientvisit_visitidcode": "v3",
@@ -126,6 +126,15 @@ def test_rollup_counts_and_dates(documents):
     assert pt1["first_visit_dtm"] == pd.Timestamp("2024-01-01")
     assert pt1["last_visit_dtm"] == pd.Timestamp("2024-03-08")
     assert pt1["providers"] == ["Dr. Jones", "Dr. Smith"]
+
+
+def test_report_and_assessment_counts(documents):
+    registry = build_patient_registry(documents).set_index("client_guid")
+
+    assert registry.loc["pt-1", "n_reports"] == 1
+    assert registry.loc["pt-1", "n_assessments"] == 1
+    assert registry.loc["pt-2", "n_reports"] == 1
+    assert registry.loc["pt-2", "n_assessments"] == 0
 
 
 def test_demographics_use_most_recently_touched_row(documents):
