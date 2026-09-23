@@ -19,9 +19,14 @@ llm = [
     "anthropic>=0.40",
     "pydantic>=2",
 ]
+web = [
+    "flask>=3.0",
+    "gunicorn>=21",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

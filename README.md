@@ -121,9 +121,54 @@ extraction - this module is for demographic/clinical detail only mentioned
 in the report's free text (occupation, handedness, etc.), not a replacement
 for those fields.
 
+## Registry web app
+
+`webapp/` is a small deployable Flask app that shows the patient registry
+in a browser. It resolves the documents dataframe from three sources, in
+priority order:
+
+1. **An uploaded CSV** - use the form to override the other sources for one request.
+2. **The latest batch CSV** written by the existing `ingest.py` CogStack
+   pipeline, found under `REGISTRY_RAW_DATA_DIR` (most recent `df_*.csv`).
+3. **A live CogStack query**, as a fallback when no batch CSV exists or
+   "force refresh" is checked. This reuses the existing `cs_core_v1`
+   cohort-searcher client (`cs.cohort_searcher_no_terms(...)`) that
+   `ingest.py` already authenticates with, rather than re-implementing
+   CogStack access - point `COGSTACK_UTIL_PATH` at the directory containing
+   `cs_core_v1.py`. If the live query fails, the app falls back to the
+   latest batch CSV (if any) and shows a warning banner instead of erroring.
+
+A "de-identify" checkbox on the page toggles `deidentify=True` on the
+registry.
+
+### Running it
+
+```bash
+pip install -e ".[web]"
+cp .env.example .env   # then edit the paths/secrets for your environment
+python -m webapp.wsgi  # dev server at http://localhost:5000
+```
+
+### Deploying it
+
+```bash
+docker build -t neuropsych-registry .
+docker run -p 5000:5000 --env-file .env neuropsych-registry
+```
+
+Or with a Procfile-based platform: `gunicorn webapp.wsgi:app` (see `Procfile`).
+
+Set these environment variables (see `.env.example`):
+
+- `REGISTRY_RAW_DATA_DIR` - directory `ingest.py` writes `df_*.csv` into.
+- `COGSTACK_UTIL_PATH` - directory containing `cs_core_v1.py`, for the live-refresh fallback.
+- `COGSTACK_INDEX`, `COGSTACK_SEARCH_STRING` - override the CogStack query (defaults match `ingest.py`).
+- `REGISTRY_SALT` - private salt for de-identified patient IDs.
+- `FLASK_SECRET_KEY` - Flask session secret.
+
 ### Development
 
 ```bash
-pip install -e ".[dev,llm]"
+pip install -e ".[dev,llm,web]"
 pytest
 ```
