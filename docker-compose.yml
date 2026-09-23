@@ -1,0 +1,37 @@
+services:
+  # On-demand Ollama server for extraction. Not started by default - the
+  # automation/extract_on_new_data.py script starts it right before a
+  # new batch needs extracting and stops it again afterward, so it isn't
+  # holding memory/CPU (or a GPU) between runs. Bring it up manually with
+  # `docker compose up -d ollama` if you'd rather run it continuously.
+  ollama:
+    image: ollama/ollama:latest
+    restart: "no"
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    # Uncomment to use a GPU (requires the NVIDIA container toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # The registry web app (see webapp/). Optional here - run separately if
+  # you deploy it elsewhere.
+  registry:
+    build: .
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    depends_on:
+      - ollama
+    profiles:
+      - webapp
+
+volumes:
+  ollama_models:

@@ -74,9 +74,12 @@ Assessment score sheets do **not** have a reliable structural pattern -
 they're free text pulled out of a PDF table where labels and their values
 often land on separate, irregularly-ordered lines, so a rule-based/regex
 parser can't reliably reconstruct battery/domain/test/subtest/value
-structure. `clinical_neuro_extractor.assessment_llm_extractor` instead uses
-Claude to read the text and extract structured rows. It requires the `llm`
-extra (`pip install -e ".[llm]"`):
+structure. `clinical_neuro_extractor.assessment_llm_extractor` instead asks
+a **locally-hosted Ollama model** to read the text and extract structured
+rows - clinical text never leaves your infrastructure, no cloud API or API
+key. It requires the `llm` extra (`pip install -e ".[llm]"`) plus a running
+Ollama server with a model pulled (`ollama pull llama3.1`; override with
+`model=` or the `OLLAMA_HOST` env var for a non-default host):
 
 ```python
 from clinical_neuro_extractor.assessment_llm_extractor import extract_assessment_measures_batch
@@ -89,20 +92,23 @@ A document that fails to extract doesn't abort the batch - its row carries
 an `error` column instead, so nothing silently disappears. This is a
 best-effort extraction (the model's read of messy free text), not a
 guaranteed-accurate structured parse - spot-check results before relying on
-them clinically.
+them clinically. Smaller local models are generally less reliable at this
+than a frontier cloud model, so accuracy is worth validating against your
+own eval before trusting it (see `evals/`).
 
 ### Report clinical/demographic details
 
 Beyond the section split above, `clinical_neuro_extractor.report_llm_extractor`
-pulls clinically useful facts out of a report's prose using the same
-Claude + Pydantic approach: diagnosis, laterality, treatment type, whether
+pulls clinically useful facts out of a report's prose using the same local
+Ollama + Pydantic approach: diagnosis, laterality, treatment type, whether
 the assessment was pre- or post-treatment, referral reason, and
 demographic context (occupation, handedness, education, marital status,
 living situation) mentioned in the text - plus each cognitive domain's
 overall rating (e.g. Memory: high average) pulled from ASSESSMENT
 FINDINGS/CONCLUSIONS. Many reports don't mention treatment at all (e.g. a
 pre-surgical baseline) - a null `treatment_type`/`treatment_timing` is a
-normal, correct result, not a failure. Also requires the `llm` extra.
+normal, correct result, not a failure. Also requires the `llm` extra and a
+running Ollama server.
 
 ```python
 from clinical_neuro_extractor.report_llm_extractor import extract_report_details_batch
@@ -121,9 +127,80 @@ extraction - this module is for demographic/clinical detail only mentioned
 in the report's free text (occupation, handedness, etc.), not a replacement
 for those fields.
 
+## Running extraction automatically on new batches
+
+`automation/extract_on_new_data.py` runs the registry + both extractors over
+any batch CSV `ingest.py` has written but not yet processed, starting the
+Ollama Docker container on-demand and stopping it again afterward (see
+`docker-compose.yml`) so it isn't holding memory/CPU between batches.
+
+Recommended usage: run it as the next step in the same cron job as
+`ingest.py`, so extraction happens right after new data lands:
+
+```cron
+0 3 1 * * cd /path/to/repo && python ingest.py && python -m automation.extract_on_new_data --raw-data-dir "$REGISTRY_RAW_DATA_DIR" --once
+```
+
+Already-processed files are tracked in `automation/.last_processed`, so a
+crash partway through only costs the files still outstanding, and a file
+that fails to extract is logged and retried on the next run rather than
+silently marked done. Outputs land in `extraction_output/<batch>/`
+(`registry.csv`, `assessment_measures.csv`, `report_details.csv`,
+`report_domain_summaries.csv`).
+
+If you don't control the scheduler running `ingest.py`, use `--watch`
+instead of `--once` to poll `--raw-data-dir` continuously (`--poll-seconds`,
+default 300). Pass `--no-docker` if you'd rather run Ollama continuously
+yourself (`docker compose up -d ollama`) instead of on-demand per batch.
+
+## Registry web app
+
+`webapp/` is a small deployable Flask app that shows the patient registry
+in a browser. It resolves the documents dataframe from three sources, in
+priority order:
+
+1. **An uploaded CSV** - use the form to override the other sources for one request.
+2. **The latest batch CSV** written by the existing `ingest.py` CogStack
+   pipeline, found under `REGISTRY_RAW_DATA_DIR` (most recent `df_*.csv`).
+3. **A live CogStack query**, as a fallback when no batch CSV exists or
+   "force refresh" is checked. This reuses the existing `cs_core_v1`
+   cohort-searcher client (`cs.cohort_searcher_no_terms(...)`) that
+   `ingest.py` already authenticates with, rather than re-implementing
+   CogStack access - point `COGSTACK_UTIL_PATH` at the directory containing
+   `cs_core_v1.py`. If the live query fails, the app falls back to the
+   latest batch CSV (if any) and shows a warning banner instead of erroring.
+
+A "de-identify" checkbox on the page toggles `deidentify=True` on the
+registry.
+
+### Running it
+
+```bash
+pip install -e ".[web]"
+cp .env.example .env   # then edit the paths/secrets for your environment
+python -m webapp.wsgi  # dev server at http://localhost:5000
+```
+
+### Deploying it
+
+```bash
+docker build -t neuropsych-registry .
+docker run -p 5000:5000 --env-file .env neuropsych-registry
+```
+
+Or with a Procfile-based platform: `gunicorn webapp.wsgi:app` (see `Procfile`).
+
+Set these environment variables (see `.env.example`):
+
+- `REGISTRY_RAW_DATA_DIR` - directory `ingest.py` writes `df_*.csv` into.
+- `COGSTACK_UTIL_PATH` - directory containing `cs_core_v1.py`, for the live-refresh fallback.
+- `COGSTACK_INDEX`, `COGSTACK_SEARCH_STRING` - override the CogStack query (defaults match `ingest.py`).
+- `REGISTRY_SALT` - private salt for de-identified patient IDs.
+- `FLASK_SECRET_KEY` - Flask session secret.
+
 ### Development
 
 ```bash
-pip install -e ".[dev,llm]"
+pip install -e ".[dev,llm,web]"
 pytest
 ```

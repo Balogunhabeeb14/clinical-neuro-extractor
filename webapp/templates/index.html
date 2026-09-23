@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <section class="controls">
+    <form method="post" enctype="multipart/form-data">
+      <label class="field">
+        <span>Upload a documents CSV (optional - overrides the batch/CogStack sources for this request)</span>
+        <input type="file" name="csv_file" accept=".csv">
+      </label>
+      <div class="field-row">
+        <label class="checkbox">
+          <input type="checkbox" name="deidentify" value="1" {% if deidentify %}checked{% endif %}>
+          De-identify (hash patient ID, drop name/DOB/MRN)
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" name="refresh" value="1">
+          Force a live CogStack refresh (skip the batch CSV)
+        </label>
+      </div>
+      <button type="submit">Build registry</button>
+    </form>
+  </section>
+
+  {% if error %}
+    <div class="banner error">
+      <strong>Couldn't load documents.</strong> {{ error }}
+    </div>
+  {% elif empty %}
+    <div class="banner warning">
+      No documents found from {{ source_label }}.
+    </div>
+  {% else %}
+    {% if warning %}
+      <div class="banner warning">{{ warning }}</div>
+    {% endif %}
+
+    {% if rows %}
+      <section class="summary">
+        <span class="stat"><strong>{{ n_patients }}</strong> patients</span>
+        <span class="stat"><strong>{{ n_documents }}</strong> documents</span>
+        <span class="stat">source: <strong>{{ source_label }}</strong></span>
+      </section>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {% for col in columns %}<th>{{ col }}</th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                {% for col in columns %}<td>{{ row[col] }}</td>{% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}
