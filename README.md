@@ -127,6 +127,32 @@ extraction - this module is for demographic/clinical detail only mentioned
 in the report's free text (occupation, handedness, etc.), not a replacement
 for those fields.
 
+## Running extraction automatically on new batches
+
+`automation/extract_on_new_data.py` runs the registry + both extractors over
+any batch CSV `ingest.py` has written but not yet processed, starting the
+Ollama Docker container on-demand and stopping it again afterward (see
+`docker-compose.yml`) so it isn't holding memory/CPU between batches.
+
+Recommended usage: run it as the next step in the same cron job as
+`ingest.py`, so extraction happens right after new data lands:
+
+```cron
+0 3 1 * * cd /path/to/repo && python ingest.py && python -m automation.extract_on_new_data --raw-data-dir "$REGISTRY_RAW_DATA_DIR" --once
+```
+
+Already-processed files are tracked in `automation/.last_processed`, so a
+crash partway through only costs the files still outstanding, and a file
+that fails to extract is logged and retried on the next run rather than
+silently marked done. Outputs land in `extraction_output/<batch>/`
+(`registry.csv`, `assessment_measures.csv`, `report_details.csv`,
+`report_domain_summaries.csv`).
+
+If you don't control the scheduler running `ingest.py`, use `--watch`
+instead of `--once` to poll `--raw-data-dir` continuously (`--poll-seconds`,
+default 300). Pass `--no-docker` if you'd rather run Ollama continuously
+yourself (`docker compose up -d ollama`) instead of on-demand per batch.
+
 ## Registry web app
 
 `webapp/` is a small deployable Flask app that shows the patient registry

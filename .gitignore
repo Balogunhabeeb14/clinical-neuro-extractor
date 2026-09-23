@@ -221,3 +221,7 @@ __marimo__/
 evals/*/baseline/
 evals/*/v[0-9]*/
 evals/*/report.html
+
+# automation/extract_on_new_data.py run state/output
+automation/.last_processed
+extraction_output/
