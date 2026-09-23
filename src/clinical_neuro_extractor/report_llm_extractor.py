@@ -6,25 +6,33 @@ the clinically useful facts within those sections - diagnosis, laterality,
 treatment type, whether the assessment was pre- or post-treatment,
 demographic context (occupation, handedness, education, ...), and each
 cognitive domain's overall rating - are stated in free prose, not a fixed
-format. This module asks Claude to read the report and pull those out as
-structured fields, the same approach used for assessment score sheets in
+format. This module asks a locally-hosted Ollama model to read the report
+and pull those out as structured fields - no clinical text is sent to a
+cloud API - the same approach used for assessment score sheets in
 :mod:`clinical_neuro_extractor.assessment_llm_extractor`.
 
-Requires the ``llm`` extra (``pip install -e ".[llm]"``): ``anthropic`` and
-``pydantic``.
+Requires the ``llm`` extra (``pip install -e ".[llm]"``): ``ollama`` and
+``pydantic``, plus a running Ollama server with the model pulled
+(``ollama pull llama3.1``).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import pandas as pd
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    import anthropic
+from .ollama_client import DEFAULT_MODEL, OllamaUnavailable, extract_structured
 
-DEFAULT_MODEL = "claude-opus-5"
+__all__ = [
+    "DEFAULT_MODEL",
+    "OllamaUnavailable",
+    "DomainSummary",
+    "ReportExtraction",
+    "extract_report_details",
+    "extract_report_details_batch",
+]
 
 _SYSTEM_PROMPT = """\
 You extract clinical details from a neuropsychological report's free text.
@@ -120,30 +128,34 @@ _SCALAR_FIELDS = [
 def extract_report_details(
     body_analysed: str,
     *,
-    client: "anthropic.Anthropic | None" = None,
+    client=None,
     model: str = DEFAULT_MODEL,
+    host: Optional[str] = None,
 ) -> ReportExtraction:
-    """Extract clinical/demographic detail from one report's free text."""
-    if client is None:
-        import anthropic as anthropic_module
+    """Extract clinical/demographic detail from one report's free text.
 
-        client = anthropic_module.Anthropic()
-
-    response = client.messages.parse(
-        model=model,
-        max_tokens=16000,
+    ``client`` is an ``ollama.Client`` (or a test double exposing the same
+    ``.chat(...)`` shape); when omitted one is built pointed at ``host`` (or
+    the ``OLLAMA_HOST`` env var, or the local default). Raises
+    :class:`~clinical_neuro_extractor.ollama_client.OllamaUnavailable` if the
+    server can't be reached or its response doesn't match the schema.
+    """
+    return extract_structured(
         system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": body_analysed}],
-        output_format=ReportExtraction,
+        user=body_analysed,
+        schema=ReportExtraction,
+        client=client,
+        model=model,
+        host=host,
     )
-    return response.parsed_output
 
 
 def extract_report_details_batch(
     documents: pd.DataFrame,
     *,
-    client: "anthropic.Anthropic | None" = None,
+    client=None,
     model: str = DEFAULT_MODEL,
+    host: Optional[str] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run :func:`extract_report_details` over every report document.
 
@@ -160,11 +172,6 @@ def extract_report_details_batch(
     - ``domain_summaries``: long format, one row per (document, domain)
       with ``overall_level``/``notes``.
     """
-    if client is None:
-        import anthropic as anthropic_module
-
-        client = anthropic_module.Anthropic()
-
     reports = documents[
         documents["document_description"].str.strip().str.lower() == "report"
     ]
@@ -176,9 +183,9 @@ def extract_report_details_batch(
         client_guid = doc.get("client_guid")
         try:
             extraction = extract_report_details(
-                doc["body_analysed"], client=client, model=model
+                doc["body_analysed"], client=client, model=model, host=host
             )
-        except Exception as exc:  # noqa: BLE001 - one bad document shouldn't abort the batch
+        except Exception as exc:  # noqa: BLE001 - one bad document (incl. OllamaUnavailable) shouldn't abort the batch
             detail_rows.append(
                 {
                     "document_guid": document_guid,

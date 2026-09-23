@@ -5,23 +5,31 @@ battery/domain/test/subtest scores, but as free text pulled out of a PDF
 table - labels and values often end up on separate lines in an order that
 regexes can't reliably reconstruct (see the module docstring discussion in
 the repo's development history). Rather than a brittle rule-based parser,
-this module asks Claude to read the text and return structured rows.
+this module asks a locally-hosted Ollama model to read the text and return
+structured rows - no clinical text is sent to a cloud API.
 
-Requires the ``llm`` extra (``pip install -e ".[llm]"``): ``anthropic`` and
-``pydantic``.
+Requires the ``llm`` extra (``pip install -e ".[llm]"``): ``ollama`` and
+``pydantic``, plus a running Ollama server with the model pulled
+(``ollama pull llama3.1``).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import pandas as pd
 from pydantic import BaseModel
 
-if TYPE_CHECKING:
-    import anthropic
+from .ollama_client import DEFAULT_MODEL, OllamaUnavailable, extract_structured
 
-DEFAULT_MODEL = "claude-opus-5"
+__all__ = [
+    "DEFAULT_MODEL",
+    "OllamaUnavailable",
+    "ExtractedMeasure",
+    "AssessmentExtraction",
+    "extract_assessment_measures",
+    "extract_assessment_measures_batch",
+]
 
 _SYSTEM_PROMPT = """\
 You extract structured neuropsychological test scores from clinical
@@ -71,28 +79,31 @@ class AssessmentExtraction(BaseModel):
 def extract_assessment_measures(
     body_analysed: str,
     *,
-    client: "anthropic.Anthropic | None" = None,
+    client=None,
     model: str = DEFAULT_MODEL,
+    host: Optional[str] = None,
 ) -> pd.DataFrame:
     """Extract structured measures from one assessment document's free text.
 
+    ``client`` is an ``ollama.Client`` (or a test double exposing the same
+    ``.chat(...)`` shape); when omitted one is built pointed at ``host`` (or
+    the ``OLLAMA_HOST`` env var, or the local default). Raises
+    :class:`~clinical_neuro_extractor.ollama_client.OllamaUnavailable` if the
+    server can't be reached or its response doesn't match the schema.
+
     Returns a dataframe with columns battery/domain/test/subtest/metric/value,
-    one row per score Claude identified. Empty if none were found.
+    one row per score the model identified. Empty if none were found.
     """
-    if client is None:
-        import anthropic as anthropic_module
-
-        client = anthropic_module.Anthropic()
-
-    response = client.messages.parse(
-        model=model,
-        max_tokens=16000,
+    extraction = extract_structured(
         system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": body_analysed}],
-        output_format=AssessmentExtraction,
+        user=body_analysed,
+        schema=AssessmentExtraction,
+        client=client,
+        model=model,
+        host=host,
     )
 
-    measures = response.parsed_output.measures
+    measures = extraction.measures
     if not measures:
         return pd.DataFrame(
             columns=["battery", "domain", "test", "subtest", "metric", "value"]
@@ -103,8 +114,9 @@ def extract_assessment_measures(
 def extract_assessment_measures_batch(
     documents: pd.DataFrame,
     *,
-    client: "anthropic.Anthropic | None" = None,
+    client=None,
     model: str = DEFAULT_MODEL,
+    host: Optional[str] = None,
 ) -> pd.DataFrame:
     """Run :func:`extract_assessment_measures` over every assessment document.
 
@@ -114,11 +126,6 @@ def extract_assessment_measures_batch(
     extract does not abort the batch - it's recorded with an ``error``
     column set instead, so no document silently disappears.
     """
-    if client is None:
-        import anthropic as anthropic_module
-
-        client = anthropic_module.Anthropic()
-
     assessments = documents[
         documents["document_description"].str.strip().str.lower() == "assessment"
     ]
@@ -127,9 +134,9 @@ def extract_assessment_measures_batch(
     for _, doc in assessments.iterrows():
         try:
             measures = extract_assessment_measures(
-                doc["body_analysed"], client=client, model=model
+                doc["body_analysed"], client=client, model=model, host=host
             )
-        except Exception as exc:  # noqa: BLE001 - one bad document shouldn't abort the batch
+        except Exception as exc:  # noqa: BLE001 - one bad document (incl. OllamaUnavailable) shouldn't abort the batch
             rows.append(
                 {
                     "document_guid": doc.get("document_guid"),

@@ -74,9 +74,12 @@ Assessment score sheets do **not** have a reliable structural pattern -
 they're free text pulled out of a PDF table where labels and their values
 often land on separate, irregularly-ordered lines, so a rule-based/regex
 parser can't reliably reconstruct battery/domain/test/subtest/value
-structure. `clinical_neuro_extractor.assessment_llm_extractor` instead uses
-Claude to read the text and extract structured rows. It requires the `llm`
-extra (`pip install -e ".[llm]"`):
+structure. `clinical_neuro_extractor.assessment_llm_extractor` instead asks
+a **locally-hosted Ollama model** to read the text and extract structured
+rows - clinical text never leaves your infrastructure, no cloud API or API
+key. It requires the `llm` extra (`pip install -e ".[llm]"`) plus a running
+Ollama server with a model pulled (`ollama pull llama3.1`; override with
+`model=` or the `OLLAMA_HOST` env var for a non-default host):
 
 ```python
 from clinical_neuro_extractor.assessment_llm_extractor import extract_assessment_measures_batch
@@ -89,20 +92,23 @@ A document that fails to extract doesn't abort the batch - its row carries
 an `error` column instead, so nothing silently disappears. This is a
 best-effort extraction (the model's read of messy free text), not a
 guaranteed-accurate structured parse - spot-check results before relying on
-them clinically.
+them clinically. Smaller local models are generally less reliable at this
+than a frontier cloud model, so accuracy is worth validating against your
+own eval before trusting it (see `evals/`).
 
 ### Report clinical/demographic details
 
 Beyond the section split above, `clinical_neuro_extractor.report_llm_extractor`
-pulls clinically useful facts out of a report's prose using the same
-Claude + Pydantic approach: diagnosis, laterality, treatment type, whether
+pulls clinically useful facts out of a report's prose using the same local
+Ollama + Pydantic approach: diagnosis, laterality, treatment type, whether
 the assessment was pre- or post-treatment, referral reason, and
 demographic context (occupation, handedness, education, marital status,
 living situation) mentioned in the text - plus each cognitive domain's
 overall rating (e.g. Memory: high average) pulled from ASSESSMENT
 FINDINGS/CONCLUSIONS. Many reports don't mention treatment at all (e.g. a
 pre-surgical baseline) - a null `treatment_type`/`treatment_timing` is a
-normal, correct result, not a failure. Also requires the `llm` extra.
+normal, correct result, not a failure. Also requires the `llm` extra and a
+running Ollama server.
 
 ```python
 from clinical_neuro_extractor.report_llm_extractor import extract_report_details_batch

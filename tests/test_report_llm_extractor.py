@@ -1,7 +1,6 @@
 import pandas as pd
 import pytest
 
-pytest.importorskip("anthropic")
 pytest.importorskip("pydantic")
 
 from clinical_neuro_extractor.report_llm_extractor import (
@@ -12,24 +11,16 @@ from clinical_neuro_extractor.report_llm_extractor import (
 )
 
 
-class _FakeResponse:
-    def __init__(self, parsed_output):
-        self.parsed_output = parsed_output
+class _FakeClient:
+    """Stands in for ollama.Client: .chat(...) -> {"message": {"content": json_str}}."""
 
-
-class _FakeMessages:
-    def __init__(self, parsed_output):
-        self._parsed_output = parsed_output
+    def __init__(self, parsed_output: ReportExtraction):
+        self._content = parsed_output.model_dump_json()
         self.calls = []
 
-    def parse(self, **kwargs):
+    def chat(self, **kwargs):
         self.calls.append(kwargs)
-        return _FakeResponse(self._parsed_output)
-
-
-class _FakeClient:
-    def __init__(self, parsed_output):
-        self.messages = _FakeMessages(parsed_output)
+        return {"message": {"content": self._content}}
 
 
 def _sample_extraction() -> ReportExtraction:
@@ -60,7 +51,7 @@ def test_extract_report_details_returns_pydantic_object():
     assert result.diagnosis_laterality == "left"
     assert result.occupation == "copy writer"
     assert len(result.domain_summaries) == 2
-    assert client.messages.calls[0]["output_format"] is ReportExtraction
+    assert client.calls[0]["format"] == ReportExtraction.model_json_schema()
 
 
 def test_batch_filters_to_report_documents_and_splits_domain_summaries():
@@ -92,17 +83,13 @@ def test_batch_filters_to_report_documents_and_splits_domain_summaries():
 
     assert list(domain_summaries["document_guid"]) == ["doc-1", "doc-1"]
     assert set(domain_summaries["domain"]) == {"Intellectual Functioning", "Memory"}
-    assert len(client.messages.calls) == 1
+    assert len(client.calls) == 1
 
 
 def test_batch_records_errors_without_aborting():
-    class _RaisingMessages:
-        def parse(self, **kwargs):
-            raise RuntimeError("boom")
-
     class _RaisingClient:
-        def __init__(self):
-            self.messages = _RaisingMessages()
+        def chat(self, **kwargs):
+            raise RuntimeError("connection refused")
 
     documents = pd.DataFrame(
         [
@@ -118,5 +105,5 @@ def test_batch_records_errors_without_aborting():
     details, domain_summaries = extract_report_details_batch(documents, client=_RaisingClient())
 
     assert len(details) == 1
-    assert details.iloc[0]["error"] == "boom"
+    assert "connection refused" in details.iloc[0]["error"]
     assert domain_summaries.empty

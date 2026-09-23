@@ -16,7 +16,7 @@ dev = [
     "pytest>=7.0",
 ]
 llm = [
-    "anthropic>=0.40",
+    "ollama>=0.4",
     "pydantic>=2",
 ]
 web = [
